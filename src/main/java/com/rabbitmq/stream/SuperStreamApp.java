@@ -2,6 +2,9 @@ package com.rabbitmq.stream;
 
 import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
+import com.rabbitmq.stream.impl.Client;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.UUID;
@@ -58,22 +61,53 @@ public class SuperStreamApp implements Callable<Integer> {
       defaultValue = "")
   private String stream;
 
+  @CommandLine.Option(
+      names = {"--load-balancer", "-lb"},
+      description = "assume stream URI points to a load balancer",
+      defaultValue = "false")
+  private boolean loadBalancer;
+
   public static void main(String[] args) {
     int exitCode = new CommandLine(new SuperStreamApp()).execute(args);
     System.exit(exitCode);
+  }
+
+  private static boolean isTls(String uri) {
+    return uri.toLowerCase().startsWith("rabbitmq-stream+tls");
   }
 
   @Override
   public Integer call() throws Exception {
     ScheduledExecutorService scheduledExecutorService =
         Executors.newSingleThreadScheduledExecutor();
+    boolean tls = isTls(this.streamUri);
+    AddressResolver addrResolver;
+    if (loadBalancer) {
+      int defaultPort = tls ? Client.DEFAULT_TLS_PORT : Client.DEFAULT_PORT;
+      URI uri;
+      try {
+        uri = new URI(this.streamUri);
+      } catch (URISyntaxException e) {
+        throw new IllegalArgumentException(
+            "Error while parsing URI " + this.streamUri + ": " + e.getMessage());
+      }
+      Address address =
+          new Address(
+              uri.getHost() == null ? "localhost" : uri.getHost(),
+              uri.getPort() == -1 ? defaultPort : uri.getPort());
+      addrResolver = addr -> address;
+    } else {
+      addrResolver = addr -> addr;
+    }
+
     if ("producer".equalsIgnoreCase(this.mode)) {
       ConnectionFactory cf = new ConnectionFactory();
       cf.setUri(this.amqpUri);
       try (Connection connection = cf.newConnection()) {
         Utils.declareSuperStreamTopology(connection, this.superStream, this.partitions);
       }
-      try (Environment environment = Environment.builder().uri(this.streamUri).build()) {
+      try (Environment environment =
+          Environment.builder().uri(this.streamUri).addressResolver(addrResolver).build()) {
         Producer producer =
             environment.producerBuilder().stream(this.superStream)
                 .routing(message -> message.getProperties().getMessageIdAsString())
@@ -106,7 +140,8 @@ public class SuperStreamApp implements Callable<Integer> {
         }
       }
     } else {
-      try (Environment environment = Environment.builder().uri(this.streamUri).build()) {
+      try (Environment environment =
+          Environment.builder().uri(this.streamUri).addressResolver(addrResolver).build()) {
         System.out.println("Starting to consume from " + this.stream + "...");
         AtomicLong messageCount = new AtomicLong();
         environment.consumerBuilder().stream(this.stream)
