@@ -69,7 +69,7 @@ public class SuperStreamApp implements Callable<Integer> {
 
   @CommandLine.Option(
       names = {"--pre-declared", "-p"},
-      description = "do not create super topology if true, default is false",
+      description = "do not create super topology if true, default is false.",
       defaultValue = "false")
   private boolean preDeclared;
 
