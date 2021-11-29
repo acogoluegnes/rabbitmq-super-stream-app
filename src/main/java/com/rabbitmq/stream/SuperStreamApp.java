@@ -67,6 +67,12 @@ public class SuperStreamApp implements Callable<Integer> {
       defaultValue = "false")
   private boolean loadBalancer;
 
+  @CommandLine.Option(
+      names = {"--pre-declared", "-p"},
+      description = "do not create super topology if true, default is false",
+      defaultValue = "false")
+  private boolean preDeclared;
+
   public static void main(String[] args) {
     int exitCode = new CommandLine(new SuperStreamApp()).execute(args);
     System.exit(exitCode);
@@ -101,11 +107,14 @@ public class SuperStreamApp implements Callable<Integer> {
     }
 
     if ("producer".equalsIgnoreCase(this.mode)) {
-      ConnectionFactory cf = new ConnectionFactory();
-      cf.setUri(this.amqpUri);
-      try (Connection connection = cf.newConnection()) {
-        Utils.declareSuperStreamTopology(connection, this.superStream, this.partitions);
+      if (!this.preDeclared) {
+        ConnectionFactory cf = new ConnectionFactory();
+        cf.setUri(this.amqpUri);
+        try (Connection connection = cf.newConnection()) {
+          Utils.declareSuperStreamTopology(connection, this.superStream, this.partitions);
+        }
       }
+
       try (Environment environment =
           Environment.builder().uri(this.streamUri).addressResolver(addrResolver).build()) {
         Producer producer =
